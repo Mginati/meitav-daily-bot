@@ -1,0 +1,20 @@
+# render.yaml - Render deployment configuration
+services:
+  - type: web
+    name: meitav-bot
+    env: docker
+    plan: free
+    healthCheckPath: /health
+    envVars:
+      - key: TELEGRAM_TOKEN
+        sync: false
+      - key: CHAT_ID
+        sync: false
+      - key: MEITAV_ID
+        sync: false
+      - key: GMAIL_CLIENT_ID
+        sync: false
+      - key: GMAIL_CLIENT_SECRET
+        sync: false
+      - key: GMAIL_REFRESH_TOKEN
+        sync: false

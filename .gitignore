@@ -1,0 +1,39 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environment
+venv/
+env/
+.venv/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Credentials (NEVER commit these!)
+credentials.json
+token.pickle
+*.pickle
+
+# Environment variables
+.env
+.env.local
+
+# Downloads
+downloads/
+*.xlsx
+*.xls
+
+# Logs
+*.log
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Debug screenshots
+*_debug.png
