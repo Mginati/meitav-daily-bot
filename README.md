@@ -65,7 +65,41 @@ git push -u origin main
 שלח לבוט בטלגרם:
 - `דוח` - לקבלת הדוח האחרון
 - `סטטוס` - בדיקת סטטוס
+- `בדיקה` - בדיקת חיבור Gmail ומיילים
 - `עזרה` - רשימת פקודות
+
+## 🐛 פתרון בעיות
+
+### הבוט מחזיר "לא נמצא דוח חדש ממיטב"
+
+1. **בדוק את חיבור Gmail:**
+   - שלח `בדיקה` לבוט
+   - הבוט יציג את כל המיילים ממיטב
+   - וודא שיש מיילים מהמייל: `meitavdashnoreply@meitav.co.il`
+
+2. **בדוק את נושא המייל:**
+   - הבוט מחפש מיילים עם הנושא: "דוח יומי לסוכן"
+   - אם הנושא שונה, יש לעדכן את הקוד ב-[gmail_handler.py](gmail_handler.py#L80)
+
+3. **בדוק הרשאות Gmail:**
+   - וודא שה-`GMAIL_REFRESH_TOKEN` תקף
+   - אם לא, הרץ שוב `python get_gmail_token.py`
+
+4. **הפעל לוגים:**
+   - בדוק את הלוגים ב-Render Dashboard
+   - חפש שגיאות בחיבור ל-Gmail
+
+### הבוט לא עונה בכלל
+
+1. בדוק ב-Render Dashboard שהשירות רץ
+2. וודא שה-`TELEGRAM_TOKEN` נכון
+3. וודא שה-`CHAT_ID` שלך נכון (שלח `/start` לבוט)
+
+### שגיאה בהורדת הקובץ
+
+1. בדוק שהקוד OTP שהזנת נכון (4 ספרות)
+2. וודא שה-`MEITAV_ID` נכון במשתני הסביבה
+3. אם הבעיה נמשכת, ייתכן שממשק האתר של מיטב השתנה
 
 ## 🔧 פיתוח מקומי
 

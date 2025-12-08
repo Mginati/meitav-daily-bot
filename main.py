@@ -54,6 +54,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "📋 *פקודות זמינות:*\n\n"
         "*דוח* - הורדה וניתוח הדוח האחרון\n"
         "*סטטוס* - בדיקת סטטוס המערכת\n"
+        "*בדיקה* - בדיקת חיבור Gmail ומיילים\n"
         "*עזרה* - הצגת הודעה זו",
         parse_mode='Markdown'
     )
@@ -61,13 +62,77 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """בדיקת סטטוס"""
-    await update.message.reply_text(
-        "✅ *סטטוס מערכת:*\n\n"
-        "🤖 בוט: פעיל\n"
-        "📧 Gmail: מחובר\n"
-        "🌐 Meitav: מוכן",
-        parse_mode='Markdown'
-    )
+    await update.message.reply_text("🔄 בודק מערכות...")
+
+    status_msg = "✅ *סטטוס מערכת:*\n\n🤖 בוט: פעיל\n"
+
+    # בדיקת Gmail
+    try:
+        gmail = GmailHandler()
+        status_msg += "📧 Gmail: ✅ מחובר\n"
+    except Exception as e:
+        status_msg += f"📧 Gmail: ❌ שגיאה - {str(e)}\n"
+        logger.error(f"Gmail connection error: {e}")
+
+    status_msg += "🌐 Meitav: מוכן"
+
+    await update.message.reply_text(status_msg, parse_mode='Markdown')
+
+
+async def test_gmail(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """בדיקת חיבור Gmail ומיילים"""
+    chat_id = str(update.effective_chat.id)
+
+    # בדיקת הרשאה
+    if chat_id != CHAT_ID:
+        await update.message.reply_text("⛔ אין לך הרשאה להשתמש בבוט זה")
+        return
+
+    await update.message.reply_text("🔍 בודק חיבור ל-Gmail...")
+
+    try:
+        gmail = GmailHandler()
+
+        # חיפוש כל המיילים ממיטב
+        query = 'from:meitavdashnoreply@meitav.co.il'
+        results = gmail.service.users().messages().list(
+            userId='me',
+            q=query,
+            maxResults=10
+        ).execute()
+
+        messages = results.get('messages', [])
+
+        if not messages:
+            await update.message.reply_text(
+                "⚠️ *לא נמצאו מיילים ממיטב*\n\n"
+                "ייתכן שהכתובת השולח שונתה או שאין מיילים בתיבה",
+                parse_mode='Markdown'
+            )
+            return
+
+        # הצגת פרטי המיילים האחרונים
+        msg = f"📧 *נמצאו {len(messages)} מיילים ממיטב:*\n\n"
+
+        for i, message in enumerate(messages[:5], 1):
+            msg_data = gmail.service.users().messages().get(
+                userId='me',
+                id=message['id'],
+                format='full'
+            ).execute()
+
+            headers = msg_data['payload']['headers']
+            subject = next((h['value'] for h in headers if h['name'] == 'Subject'), 'ללא נושא')
+            date = next((h['value'] for h in headers if h['name'] == 'Date'), 'ללא תאריך')
+
+            msg += f"{i}. *{subject}*\n"
+            msg += f"   📅 {date}\n\n"
+
+        await update.message.reply_text(msg, parse_mode='Markdown')
+
+    except Exception as e:
+        logger.error(f"Error in test_gmail: {e}")
+        await update.message.reply_text(f"❌ שגיאה: {str(e)}")
 
 
 async def request_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -89,7 +154,14 @@ async def request_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
         email_data = await gmail.get_latest_meitav_email()
         
         if not email_data:
-            await update.message.reply_text("❌ לא נמצא דוח חדש ממיטב")
+            await update.message.reply_text(
+                "❌ *לא נמצא דוח חדש ממיטב*\n\n"
+                "נסה את הפעולות הבאות:\n"
+                "1️⃣ שלח *בדיקה* לראות אילו מיילים קיימים\n"
+                "2️⃣ וודא שיש מיילים מהיום מ-meitavdashnoreply@meitav.co.il\n"
+                "3️⃣ בדוק שהבוט מחובר ל-Gmail הנכון",
+                parse_mode='Markdown'
+            )
             return ConversationHandler.END
         
         current_download_url = email_data['download_url']
@@ -205,8 +277,10 @@ def main():
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CommandHandler("status", status))
+    application.add_handler(CommandHandler("test_gmail", test_gmail))
     application.add_handler(MessageHandler(filters.Regex(r'^(עזרה|help)$'), help_command))
     application.add_handler(MessageHandler(filters.Regex(r'^(סטטוס|status)$'), status))
+    application.add_handler(MessageHandler(filters.Regex(r'^(בדיקה|test)$'), test_gmail))
     application.add_handler(conv_handler)
     
     # הפעלה

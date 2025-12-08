@@ -71,25 +71,40 @@ class GmailHandler:
     async def get_latest_meitav_email(self) -> dict:
         """
         מציאת המייל האחרון ממיטב עם דוח יומי
-        
+
         Returns:
             dict עם download_url ו-date, או None אם לא נמצא
         """
         try:
             # חיפוש מיילים ממיטב
             query = 'from:meitavdashnoreply@meitav.co.il subject:"דוח יומי לסוכן"'
-            
+            logger.info(f"Searching for emails with query: {query}")
+
             results = self.service.users().messages().list(
                 userId='me',
                 q=query,
                 maxResults=5
             ).execute()
-            
+
             messages = results.get('messages', [])
-            
+            logger.info(f"Found {len(messages)} messages matching the query")
+
             if not messages:
-                logger.warning("No Meitav emails found")
-                return None
+                logger.warning("No Meitav emails found with the specific query")
+                # ננסה חיפוש רחב יותר
+                logger.info("Trying broader search...")
+                query_broad = 'from:meitavdashnoreply@meitav.co.il'
+                results_broad = self.service.users().messages().list(
+                    userId='me',
+                    q=query_broad,
+                    maxResults=5
+                ).execute()
+                messages = results_broad.get('messages', [])
+                logger.info(f"Broader search found {len(messages)} messages")
+
+                if not messages:
+                    logger.warning("No emails from Meitav found at all")
+                    return None
             
             # קבלת המייל האחרון
             latest_message = self.service.users().messages().get(
@@ -101,6 +116,7 @@ class GmailHandler:
             # חילוץ התאריך מהכותרת
             headers = latest_message['payload']['headers']
             subject = next((h['value'] for h in headers if h['name'] == 'Subject'), '')
+            logger.info(f"Email subject: {subject}")
             date_match = re.search(r'(\d{2}/\d{2}/\d{4})', subject)
             report_date = date_match.group(1) if date_match else 'לא ידוע'
             
