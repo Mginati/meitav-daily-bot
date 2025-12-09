@@ -55,6 +55,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "*דוח* - הורדה וניתוח הדוח האחרון\n"
         "*סטטוס* - בדיקת סטטוס המערכת\n"
         "*בדיקה* - בדיקת חיבור Gmail ומיילים\n"
+        "*דבג* - הצגת תוכן המייל האחרון (debug)\n"
         "*עזרה* - הצגת הודעה זו",
         parse_mode='Markdown'
     )
@@ -128,10 +129,77 @@ async def test_gmail(update: Update, context: ContextTypes.DEFAULT_TYPE):
             msg += f"{i}. *{subject}*\n"
             msg += f"   📅 {date}\n\n"
 
+        msg += "\n💡 כדי לראות את תוכן המייל האחרון, שלח: *דבג*"
+
         await update.message.reply_text(msg, parse_mode='Markdown')
 
     except Exception as e:
         logger.error(f"Error in test_gmail: {e}")
+        await update.message.reply_text(f"❌ שגיאה: {str(e)}")
+
+
+async def debug_email(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """הצגת תוכן המייל האחרון לצורך דיבאג"""
+    chat_id = str(update.effective_chat.id)
+
+    # בדיקת הרשאה
+    if chat_id != CHAT_ID:
+        await update.message.reply_text("⛔ אין לך הרשאה להשתמש בבוט זה")
+        return
+
+    await update.message.reply_text("🔍 מחפש את המייל האחרון...")
+
+    try:
+        gmail = GmailHandler()
+
+        # חיפוש המייל האחרון
+        query = 'from:meitavdashnoreply@meitav.co.il'
+        results = gmail.service.users().messages().list(
+            userId='me',
+            q=query,
+            maxResults=1
+        ).execute()
+
+        messages = results.get('messages', [])
+
+        if not messages:
+            await update.message.reply_text("❌ לא נמצאו מיילים")
+            return
+
+        # קבלת המייל
+        msg_data = gmail.service.users().messages().get(
+            userId='me',
+            id=messages[0]['id'],
+            format='full'
+        ).execute()
+
+        headers = msg_data['payload']['headers']
+        subject = next((h['value'] for h in headers if h['name'] == 'Subject'), 'ללא נושא')
+
+        # חילוץ תוכן
+        body_text = gmail._get_email_body(msg_data, 'text/plain')
+        body_html = gmail._get_email_body(msg_data, 'text/html')
+
+        # שליחת המידע
+        debug_msg = f"📧 *נושא:* {subject}\n\n"
+        debug_msg += f"📝 *תוכן טקסט:*\n```\n{body_text[:500] if body_text else 'ריק'}\n```\n\n"
+        debug_msg += f"🌐 *תוכן HTML (תחילת):*\n```\n{body_html[:500] if body_html else 'ריק'}\n```"
+
+        await update.message.reply_text(debug_msg, parse_mode='Markdown')
+
+        # חיפוש URLs
+        import re
+        all_urls = re.findall(r'https?://[^\s<>"]+', body_text + body_html)
+        if all_urls:
+            urls_msg = f"\n\n🔗 *נמצאו {len(all_urls)} קישורים:*\n"
+            for i, url in enumerate(all_urls[:5], 1):
+                urls_msg += f"{i}. {url[:50]}...\n"
+            await update.message.reply_text(urls_msg)
+        else:
+            await update.message.reply_text("⚠️ לא נמצאו קישורים במייל!")
+
+    except Exception as e:
+        logger.error(f"Error in debug_email: {e}")
         await update.message.reply_text(f"❌ שגיאה: {str(e)}")
 
 
@@ -278,9 +346,11 @@ def main():
     application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CommandHandler("status", status))
     application.add_handler(CommandHandler("test_gmail", test_gmail))
+    application.add_handler(CommandHandler("debug", debug_email))
     application.add_handler(MessageHandler(filters.Regex(r'^(עזרה|help)$'), help_command))
     application.add_handler(MessageHandler(filters.Regex(r'^(סטטוס|status)$'), status))
     application.add_handler(MessageHandler(filters.Regex(r'^(בדיקה|test)$'), test_gmail))
+    application.add_handler(MessageHandler(filters.Regex(r'^(דבג|debug)$'), debug_email))
     application.add_handler(conv_handler)
     
     # הפעלה

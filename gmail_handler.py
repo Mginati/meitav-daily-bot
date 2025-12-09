@@ -125,12 +125,16 @@ class GmailHandler:
             
             # חיפוש קישור ההורדה
             download_url = self._extract_download_url(body)
-            
+
             if not download_url:
+                logger.warning("No URL found in text/plain body")
+                logger.debug(f"Text body preview: {body[:500] if body else 'EMPTY'}")
                 # נסיון לחפש ב-HTML
                 html_body = self._get_email_body(latest_message, 'text/html')
+                logger.info(f"HTML body length: {len(html_body) if html_body else 0}")
+                logger.debug(f"HTML body preview: {html_body[:500] if html_body else 'EMPTY'}")
                 download_url = self._extract_download_url(html_body)
-            
+
             if download_url:
                 logger.info(f"Found download URL for date: {report_date}")
                 return {
@@ -140,6 +144,8 @@ class GmailHandler:
                 }
             else:
                 logger.warning("Could not find download URL in email")
+                logger.error(f"Email body (text): {body[:1000] if body else 'EMPTY'}")
+                logger.error(f"Email body (html): {html_body[:1000] if html_body else 'EMPTY'}")
                 return None
             
         except Exception as e:
