@@ -243,7 +243,17 @@ async def request_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         # התחלת הורדה
         downloader = MeitavDownloader()
-        await downloader.start()
+        logger.info("Created MeitavDownloader instance")
+
+        try:
+            logger.info("Starting browser...")
+            await downloader.start()
+            logger.info("Browser started successfully")
+        except Exception as e:
+            logger.error(f"Failed to start browser: {e}")
+            await update.message.reply_text(f"❌ שגיאה באתחול הדפדפן: {str(e)}")
+            return ConversationHandler.END
+
         otp_sent = await downloader.navigate_and_request_otp(current_download_url, MEITAV_ID)
         
         if otp_sent:
