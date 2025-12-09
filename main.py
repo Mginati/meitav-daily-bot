@@ -320,44 +320,6 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return ConversationHandler.END
 
 
-def main():
-    """הפעלת הבוט"""
-    # יצירת האפליקציה
-    application = Application.builder().token(TELEGRAM_TOKEN).build()
-    
-    # Conversation handler לתהליך הדוח
-    conv_handler = ConversationHandler(
-        entry_points=[
-            MessageHandler(filters.Regex(r'^(דוח|דו"ח|report)$'), request_report)
-        ],
-        states={
-            WAITING_FOR_OTP: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, receive_otp)
-            ],
-        },
-        fallbacks=[
-            CommandHandler('cancel', cancel),
-            MessageHandler(filters.Regex(r'^(ביטול|cancel)$'), cancel)
-        ],
-    )
-    
-    # הוספת handlers
-    application.add_handler(CommandHandler("start", start))
-    application.add_handler(CommandHandler("help", help_command))
-    application.add_handler(CommandHandler("status", status))
-    application.add_handler(CommandHandler("test_gmail", test_gmail))
-    application.add_handler(CommandHandler("debug", debug_email))
-    application.add_handler(MessageHandler(filters.Regex(r'^(עזרה|help)$'), help_command))
-    application.add_handler(MessageHandler(filters.Regex(r'^(סטטוס|status)$'), status))
-    application.add_handler(MessageHandler(filters.Regex(r'^(בדיקה|test)$'), test_gmail))
-    application.add_handler(MessageHandler(filters.Regex(r'^(דבג|debug)$'), debug_email))
-    application.add_handler(conv_handler)
-    
-    # הפעלה
-    logger.info("Starting bot...")
-    application.run_polling(allowed_updates=Update.ALL_TYPES)
-
-
 if __name__ == '__main__':
     # פורט דמה ל-Render (לא בשימוש אמיתי)
     import os
@@ -382,11 +344,46 @@ if __name__ == '__main__':
 
     # הרצת שני הדברים במקביל
     async def run_both():
+        # הפעלת web server
         await start_web_server()
-        # הבוט ירוץ בחוט נפרד
-        import threading
-        bot_thread = threading.Thread(target=main)
-        bot_thread.start()
+
+        # הפעלת הבוט באותו event loop
+        application = Application.builder().token(TELEGRAM_TOKEN).build()
+
+        # Conversation handler לתהליך הדוח
+        conv_handler = ConversationHandler(
+            entry_points=[
+                MessageHandler(filters.Regex(r'^(דוח|דו"ח|report)$'), request_report)
+            ],
+            states={
+                WAITING_FOR_OTP: [
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, receive_otp)
+                ],
+            },
+            fallbacks=[
+                CommandHandler('cancel', cancel),
+                MessageHandler(filters.Regex(r'^(ביטול|cancel)$'), cancel)
+            ],
+        )
+
+        # הוספת handlers
+        application.add_handler(CommandHandler("start", start))
+        application.add_handler(CommandHandler("help", help_command))
+        application.add_handler(CommandHandler("status", status))
+        application.add_handler(CommandHandler("test_gmail", test_gmail))
+        application.add_handler(CommandHandler("debug", debug_email))
+        application.add_handler(MessageHandler(filters.Regex(r'^(עזרה|help)$'), help_command))
+        application.add_handler(MessageHandler(filters.Regex(r'^(סטטוס|status)$'), status))
+        application.add_handler(MessageHandler(filters.Regex(r'^(בדיקה|test)$'), test_gmail))
+        application.add_handler(MessageHandler(filters.Regex(r'^(דבג|debug)$'), debug_email))
+        application.add_handler(conv_handler)
+
+        # הפעלת הבוט
+        logger.info("Starting bot...")
+        await application.initialize()
+        await application.start()
+        await application.updater.start_polling(allowed_updates=Update.ALL_TYPES)
+
         # שמירה על התהליך חי
         while True:
             await asyncio.sleep(3600)
