@@ -1,6 +1,6 @@
 # render.yaml - Render deployment configuration
 services:
-  - type: worker
+  - type: web
     name: meitav-bot
     env: docker
     plan: free

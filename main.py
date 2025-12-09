@@ -359,4 +359,36 @@ def main():
 
 
 if __name__ == '__main__':
-    main()
+    # פורט דמה ל-Render (לא בשימוש אמיתי)
+    import os
+    port = int(os.environ.get('PORT', 8080))
+
+    # הפעלת web server פשוט ברקע (כדי ש-Render לא יכבה אותנו)
+    from aiohttp import web
+    import asyncio
+
+    async def health(request):
+        return web.Response(text='OK')
+
+    async def start_web_server():
+        app = web.Application()
+        app.router.add_get('/health', health)
+        app.router.add_get('/', health)
+        runner = web.AppRunner(app)
+        await runner.setup()
+        site = web.TCPSite(runner, '0.0.0.0', port)
+        await site.start()
+        logger.info(f"Health check server running on port {port}")
+
+    # הרצת שני הדברים במקביל
+    async def run_both():
+        await start_web_server()
+        # הבוט ירוץ בחוט נפרד
+        import threading
+        bot_thread = threading.Thread(target=main)
+        bot_thread.start()
+        # שמירה על התהליך חי
+        while True:
+            await asyncio.sleep(3600)
+
+    asyncio.run(run_both())
