@@ -7,6 +7,7 @@ WORKDIR /app
 # Set environment variables
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 
 # Install system dependencies for Playwright + Chromium dependencies
 RUN apt-get update && apt-get install -y \
@@ -60,8 +61,8 @@ COPY requirements.txt .
 # Install Python dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Install Playwright and browsers
-RUN pip install playwright && playwright install chromium
+# Install Playwright browsers with dependencies
+RUN playwright install --with-deps chromium
 
 # Copy application code
 COPY . .
