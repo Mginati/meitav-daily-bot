@@ -8,7 +8,7 @@ WORKDIR /app
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 
-# Install system dependencies for Playwright
+# Install system dependencies for Playwright + Chromium dependencies
 RUN apt-get update && apt-get install -y \
     wget \
     gnupg \
@@ -33,6 +33,25 @@ RUN apt-get update && apt-get install -y \
     libxkbcommon0 \
     libxrandr2 \
     xdg-utils \
+    libu2f-udev \
+    libvulkan1 \
+    libxshmfence1 \
+    libglib2.0-0 \
+    libnss3 \
+    libnspr4 \
+    libdbus-1-3 \
+    libxcb1 \
+    libxcomposite1 \
+    libxdamage1 \
+    libxext6 \
+    libxfixes3 \
+    libxrandr2 \
+    libgbm1 \
+    libpango-1.0-0 \
+    libcairo2 \
+    libasound2 \
+    libatspi2.0-0 \
+    libxshmfence1 \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements first for caching
@@ -41,8 +60,8 @@ COPY requirements.txt .
 # Install Python dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Install Playwright and browsers with dependencies
-RUN pip install playwright && playwright install --with-deps chromium
+# Install Playwright and browsers
+RUN pip install playwright && playwright install chromium
 
 # Copy application code
 COPY . .
