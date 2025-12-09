@@ -77,7 +77,7 @@ class GmailHandler:
         """
         try:
             # חיפוש מיילים ממיטב
-            query = 'from:meitavdashnoreply@meitav.co.il subject:"דוח יומי לסוכן"'
+            query = 'from:meitavdashnoreply@meitav.co.il subject:"דוח יומי"'
             logger.info(f"Searching for emails with query: {query}")
 
             results = self.service.users().messages().list(
@@ -105,35 +105,40 @@ class GmailHandler:
                 if not messages:
                     logger.warning("No emails from Meitav found at all")
                     return None
-            
+
             # קבלת המייל האחרון
             latest_message = self.service.users().messages().get(
                 userId='me',
                 id=messages[0]['id'],
                 format='full'
             ).execute()
-            
+
             # חילוץ התאריך מהכותרת
             headers = latest_message['payload']['headers']
             subject = next((h['value'] for h in headers if h['name'] == 'Subject'), '')
             logger.info(f"Email subject: {subject}")
             date_match = re.search(r'(\d{2}/\d{2}/\d{4})', subject)
             report_date = date_match.group(1) if date_match else 'לא ידוע'
-            
-            # חילוץ תוכן המייל
-            body = self._get_email_body(latest_message)
-            
-            # חיפוש קישור ההורדה
-            download_url = self._extract_download_url(body)
 
+            # חיפוש קישור בתוכן המייל
+            body = self._get_email_body(latest_message)
+            html_body = self._get_email_body(latest_message, 'text/html')
+
+            # נסיון למצוא קישור להורדה בגוף המייל
+            download_url = self._extract_download_url(body)
             if not download_url:
-                logger.warning("No URL found in text/plain body")
-                logger.debug(f"Text body preview: {body[:500] if body else 'EMPTY'}")
-                # נסיון לחפש ב-HTML
-                html_body = self._get_email_body(latest_message, 'text/html')
-                logger.info(f"HTML body length: {len(html_body) if html_body else 0}")
-                logger.debug(f"HTML body preview: {html_body[:500] if html_body else 'EMPTY'}")
                 download_url = self._extract_download_url(html_body)
+
+            # אם לא מצאנו בגוף המייל, נחפש בקישור של attachment
+            if not download_url:
+                logger.info("No URL in body, checking for SafeMail links in full content")
+                # חיפוש קישורי safemail בכל התוכן
+                all_content = body + html_body
+                safemail_match = re.search(r'(https?://safemail\.meitav\.co\.il/[^\s<>"\']+)', all_content, re.IGNORECASE)
+                if safemail_match:
+                    download_url = safemail_match.group(1)
+                    download_url = download_url.replace('&amp;', '&')
+                    logger.info(f"Found SafeMail URL in content: {download_url}")
 
             if download_url:
                 logger.info(f"Found download URL for date: {report_date}")
@@ -147,7 +152,7 @@ class GmailHandler:
                 logger.error(f"Email body (text): {body[:1000] if body else 'EMPTY'}")
                 logger.error(f"Email body (html): {html_body[:1000] if html_body else 'EMPTY'}")
                 return None
-            
+
         except Exception as e:
             logger.error(f"Error getting Meitav email: {e}")
             return None
