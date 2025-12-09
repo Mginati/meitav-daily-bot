@@ -68,7 +68,7 @@ class GmailHandler:
         self.service = build('gmail', 'v1', credentials=creds)
         logger.info("Gmail authenticated successfully")
     
-    async def get_latest_meitav_email(self) -> dict:
+    def get_latest_meitav_email(self) -> dict:
         """
         מציאת המייל האחרון ממיטב עם דוח יומי
 

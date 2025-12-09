@@ -219,7 +219,7 @@ async def request_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         # חיפוש המייל האחרון
         gmail = GmailHandler()
-        email_data = await gmail.get_latest_meitav_email()
+        email_data = gmail.get_latest_meitav_email()
         
         if not email_data:
             await update.message.reply_text(
