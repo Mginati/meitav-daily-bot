@@ -2,6 +2,7 @@
 Meitav Downloader
 =================
 הורדת קבצים מאתר מיטב באמצעות Playwright
+תומך בדפדפן מקומי או דפדפן מרוחק (Browserless.io)
 """
 
 import os
@@ -11,6 +12,10 @@ from playwright.async_api import async_playwright, Browser, Page
 
 logger = logging.getLogger(__name__)
 
+# Browserless.io - שירות דפדפן מרוחק חינמי
+BROWSERLESS_URL = os.getenv('BROWSERLESS_URL', 'wss://chrome.browserless.io')
+BROWSERLESS_TOKEN = os.getenv('BROWSERLESS_TOKEN', '')
+
 
 class MeitavDownloader:
     def __init__(self):
@@ -18,21 +23,36 @@ class MeitavDownloader:
         self.browser: Browser = None
         self.page: Page = None
         self.download_path = "/tmp/meitav_downloads"
-        
+
     async def start(self):
-        """הפעלת הדפדפן"""
+        """הפעלת הדפדפן - מקומי או מרוחק"""
         os.makedirs(self.download_path, exist_ok=True)
-        
+
         self.playwright = await async_playwright().start()
-        self.browser = await self.playwright.chromium.launch(
-            headless=True,
-            args=['--no-sandbox', '--disable-setuid-sandbox']
-        )
+
+        # אם יש טוקן של Browserless - השתמש בדפדפן מרוחק
+        if BROWSERLESS_TOKEN:
+            browserless_ws = f"{BROWSERLESS_URL}?token={BROWSERLESS_TOKEN}"
+            logger.info(f"Connecting to remote browser (Browserless.io)...")
+            try:
+                self.browser = await self.playwright.chromium.connect_over_cdp(browserless_ws)
+                logger.info("Connected to Browserless.io successfully!")
+            except Exception as e:
+                logger.error(f"Failed to connect to Browserless: {e}")
+                raise Exception(f"Browserless connection failed: {e}")
+        else:
+            # דפדפן מקומי
+            logger.info("Starting local browser...")
+            self.browser = await self.playwright.chromium.launch(
+                headless=True,
+                args=['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage']
+            )
+
         self.page = await self.browser.new_page()
-        
-        # הגדרת תיקיית הורדות
+
+        # הגדרת timeout
         await self.page.context.set_default_timeout(60000)
-        
+
         logger.info("Browser started")
     
     async def navigate_and_request_otp(self, url: str, id_number: str) -> bool:
