@@ -8,7 +8,6 @@ Meitav Downloader
 import os
 import asyncio
 import logging
-from playwright.async_api import async_playwright, Browser, Page
 
 logger = logging.getLogger(__name__)
 
@@ -20,20 +19,31 @@ BROWSERLESS_TOKEN = os.getenv('BROWSERLESS_TOKEN', '')
 class MeitavDownloader:
     def __init__(self):
         self.playwright = None
-        self.browser: Browser = None
-        self.page: Page = None
+        self.browser = None
+        self.page = None
         self.download_path = "/tmp/meitav_downloads"
 
     async def start(self):
         """הפעלת הדפדפן - מקומי או מרוחק"""
         os.makedirs(self.download_path, exist_ok=True)
 
-        self.playwright = await async_playwright().start()
+        # Import playwright dynamically
+        from playwright.async_api import async_playwright
+
+        logger.info("Initializing Playwright...")
+        pw = async_playwright()
+        self.playwright = await pw.start()
+
+        if self.playwright is None:
+            raise Exception("Failed to initialize Playwright - returned None")
+
+        logger.info("Playwright initialized successfully")
 
         # אם יש טוקן של Browserless - השתמש בדפדפן מרוחק
         if BROWSERLESS_TOKEN:
             browserless_ws = f"{BROWSERLESS_URL}?token={BROWSERLESS_TOKEN}"
             logger.info(f"Connecting to remote browser (Browserless.io)...")
+            logger.info(f"WebSocket URL: {BROWSERLESS_URL}?token=***")
             try:
                 self.browser = await self.playwright.chromium.connect_over_cdp(browserless_ws)
                 logger.info("Connected to Browserless.io successfully!")
@@ -42,7 +52,7 @@ class MeitavDownloader:
                 raise Exception(f"Browserless connection failed: {e}")
         else:
             # דפדפן מקומי
-            logger.info("Starting local browser...")
+            logger.info("No BROWSERLESS_TOKEN found, starting local browser...")
             self.browser = await self.playwright.chromium.launch(
                 headless=True,
                 args=['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage']
