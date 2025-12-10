@@ -52,18 +52,30 @@ class MeitavDownloader:
         # הגדרת timeout
         self.page.setDefaultNavigationTimeout(60000)
 
+        # הגדרת נתיב הורדה
+        await self.page._client.send('Page.setDownloadBehavior', {
+            'behavior': 'allow',
+            'downloadPath': self.download_path
+        })
+
         logger.info("Browser started")
 
-    async def navigate_and_request_otp(self, url: str, id_number: str) -> bool:
+    async def download_report(self, url: str, id_number: str) -> str:
         """
-        כניסה לאתר מיטב והזנת תעודת זהות
+        הורדת הדוח מאתר מיטב
+
+        התהליך:
+        1. כניסה לקישור
+        2. הזנת תעודת זהות
+        3. לחיצה על התחבר
+        4. לחיצה על הקובץ להורדה
 
         Args:
             url: קישור ההורדה מהמייל
             id_number: תעודת זהות
 
         Returns:
-            True אם ה-OTP נשלח בהצלחה
+            נתיב הקובץ שהורד או None
         """
         try:
             logger.info(f"Navigating to: {url}")
@@ -72,153 +84,141 @@ class MeitavDownloader:
             # מחכה לטעינת הדף
             await asyncio.sleep(2)
 
-            # מחפש את שדה הסיסמה (תעודת זהות)
-            password_selectors = [
-                'input[name="truePass"]',
-                'input[placeholder*="סיסמה"]',
-                'input[type="password"]',
-                'input[type="text"]',
-                '#truePass',
-                '.truePass'
-            ]
+            # שלב 1: מחפש את שדה הסיסמה (truePass)
+            logger.info("Looking for password field (truePass)...")
 
             password_field = None
-            for selector in password_selectors:
+            try:
+                # מחפש את השדה הספציפי של מיטב
+                await self.page.waitForSelector('input[name="truePass"]', {'timeout': 10000})
+                password_field = await self.page.querySelector('input[name="truePass"]')
+                logger.info("Found truePass field")
+            except:
+                # נסיון חלופי
                 try:
-                    await self.page.waitForSelector(selector, {'timeout': 5000})
-                    password_field = await self.page.querySelector(selector)
-                    if password_field:
-                        logger.info(f"Found password field with selector: {selector}")
-                        break
+                    password_field = await self.page.querySelector('input[type="password"]')
+                    if not password_field:
+                        password_field = await self.page.querySelector('input[type="text"]')
+                    logger.info("Found alternative input field")
                 except:
-                    continue
+                    pass
 
             if not password_field:
                 logger.error("Could not find password field")
-                await self.page.screenshot({'path': '/tmp/meitav_debug.png'})
-                return False
+                await self.page.screenshot({'path': '/tmp/meitav_debug_step1.png'})
+                return None
 
-            # הזנת תעודת הזהות
+            # שלב 2: הזנת תעודת הזהות
+            await password_field.click()
             await password_field.type(id_number)
             logger.info("ID number entered")
 
-            # לחיצה על כפתור התחברות
-            submit_selectors = [
-                'button',
-                'input[type="submit"]',
-                '[type="submit"]',
-                '.login-button',
-                '#loginButton'
-            ]
+            await asyncio.sleep(1)
 
-            for selector in submit_selectors:
+            # שלב 3: לחיצה על כפתור התחבר
+            logger.info("Looking for submit button...")
+
+            clicked = False
+            # מחפש כפתור עם הטקסט "התחבר"
+            buttons = await self.page.querySelectorAll('button, input[type="submit"], .btn, [type="button"]')
+            for button in buttons:
                 try:
-                    await self.page.waitForSelector(selector, {'timeout': 3000})
-                    buttons = await self.page.querySelectorAll(selector)
-                    for button in buttons:
-                        text = await self.page.evaluate('(el) => el.innerText || el.value || ""', button)
-                        if 'התחבר' in text or 'כניסה' in text or 'login' in text.lower():
-                            await button.click()
-                            logger.info(f"Clicked submit button")
-                            break
-                    else:
-                        continue
-                    break
-                except:
-                    continue
-
-            # מחכה לשליחת ה-OTP
-            await asyncio.sleep(3)
-
-            # בדיקה שהדף עבר למצב המתנה ל-OTP
-            page_content = await self.page.content()
-            if 'OTP' in page_content or 'קוד' in page_content or 'SMS' in page_content or 'סיסמה חד' in page_content:
-                logger.info("OTP requested successfully")
-                return True
-
-            logger.info("Assuming OTP was sent")
-            return True
-
-        except Exception as e:
-            logger.error(f"Error in navigate_and_request_otp: {e}")
-            return False
-
-    async def submit_otp_and_download(self, otp_code: str) -> str:
-        """
-        הזנת קוד OTP והורדת הקובץ
-
-        Args:
-            otp_code: קוד 4 ספרות מה-SMS
-
-        Returns:
-            נתיב הקובץ שהורד או None
-        """
-        try:
-            # הגדרת נתיב הורדה
-            await self.page._client.send('Page.setDownloadBehavior', {
-                'behavior': 'allow',
-                'downloadPath': self.download_path
-            })
-
-            # מחפש את שדה ה-OTP
-            otp_selectors = [
-                'input[name="otp"]',
-                'input[placeholder*="קוד"]',
-                'input[placeholder*="OTP"]',
-                'input[type="text"]:not([name="truePass"])',
-                'input[maxlength="4"]',
-                'input[maxlength="6"]'
-            ]
-
-            otp_field = None
-            for selector in otp_selectors:
-                try:
-                    await self.page.waitForSelector(selector, {'timeout': 5000})
-                    otp_field = await self.page.querySelector(selector)
-                    if otp_field:
-                        logger.info(f"Found OTP field with selector: {selector}")
+                    text = await self.page.evaluate('(el) => el.innerText || el.value || ""', button)
+                    if 'התחבר' in text or 'כניסה' in text or 'login' in text.lower() or 'submit' in text.lower():
+                        await button.click()
+                        logger.info(f"Clicked button: {text}")
+                        clicked = True
                         break
                 except:
                     continue
 
-            if not otp_field:
-                otp_field = await self.page.querySelector('input[type="text"]')
-
-            if otp_field:
-                await otp_field.type(otp_code)
-                logger.info("OTP entered")
-
-            # לחיצה על כפתור אישור/התחברות
-            submit_selectors = [
-                'button',
-                'input[type="submit"]',
-                '[type="submit"]'
-            ]
-
-            for selector in submit_selectors:
+            if not clicked:
+                # נסיון ללחוץ על כל כפתור
                 try:
-                    await self.page.waitForSelector(selector, {'timeout': 3000})
-                    buttons = await self.page.querySelectorAll(selector)
-                    for button in buttons:
-                        text = await self.page.evaluate('(el) => el.innerText || el.value || ""', button)
-                        if 'אישור' in text or 'התחבר' in text or 'כניסה' in text:
-                            await button.click()
-                            logger.info(f"Clicked button")
-                            break
-                    else:
-                        continue
-                    break
+                    submit_btn = await self.page.querySelector('input[type="submit"]')
+                    if submit_btn:
+                        await submit_btn.click()
+                        clicked = True
+                        logger.info("Clicked submit input")
+                except:
+                    pass
+
+            if not clicked:
+                logger.error("Could not find submit button")
+                await self.page.screenshot({'path': '/tmp/meitav_debug_step3.png'})
+                return None
+
+            # מחכה לטעינת הדף הבא (עמוד המסמכים)
+            logger.info("Waiting for documents page...")
+            await asyncio.sleep(5)
+
+            # צילום מסך לדיבוג
+            await self.page.screenshot({'path': '/tmp/meitav_debug_after_login.png'})
+
+            # שלב 4: חיפוש קישור להורדת הקובץ
+            logger.info("Looking for download link...")
+
+            # מחפש קישור לקובץ xlsx
+            download_link = None
+
+            # נסיון 1: מחפש קישור עם xlsx בטקסט או ב-href
+            links = await self.page.querySelectorAll('a')
+            for link in links:
+                try:
+                    href = await self.page.evaluate('(el) => el.href || ""', link)
+                    text = await self.page.evaluate('(el) => el.innerText || ""', link)
+
+                    if '.xlsx' in href.lower() or '.xlsx' in text.lower() or 'דוח' in text:
+                        download_link = link
+                        logger.info(f"Found download link: {text}")
+                        break
                 except:
                     continue
 
+            # נסיון 2: מחפש כל אלמנט שניתן ללחוץ עליו עם xlsx
+            if not download_link:
+                elements = await self.page.querySelectorAll('[href*=".xlsx"], [onclick*="download"], .download-link')
+                if elements:
+                    download_link = elements[0]
+                    logger.info("Found download element by selector")
+
+            # נסיון 3: מחפש לפי טקסט שמכיל "xlsx" או "דוח"
+            if not download_link:
+                all_elements = await self.page.querySelectorAll('*')
+                for el in all_elements:
+                    try:
+                        text = await self.page.evaluate('(el) => el.innerText || ""', el)
+                        tag = await self.page.evaluate('(el) => el.tagName', el)
+                        if '.xlsx' in text and tag in ['A', 'SPAN', 'DIV', 'TD']:
+                            download_link = el
+                            logger.info(f"Found element with xlsx text: {text[:50]}")
+                            break
+                    except:
+                        continue
+
+            if not download_link:
+                logger.error("Could not find download link")
+                page_content = await self.page.content()
+                logger.info(f"Page content preview: {page_content[:1000]}")
+                await self.page.screenshot({'path': '/tmp/meitav_debug_no_link.png'})
+                return None
+
+            # לחיצה על הקישור להורדה
+            logger.info("Clicking download link...")
+            await download_link.click()
+
             # מחכה להורדה
+            logger.info("Waiting for download to complete...")
             await asyncio.sleep(10)
 
             # חיפוש הקובץ שהורד
             files = os.listdir(self.download_path)
             xlsx_files = [f for f in files if f.endswith('.xlsx')]
+
             if xlsx_files:
-                file_path = os.path.join(self.download_path, xlsx_files[-1])
+                # מחזיר את הקובץ האחרון
+                xlsx_files.sort(key=lambda x: os.path.getmtime(os.path.join(self.download_path, x)), reverse=True)
+                file_path = os.path.join(self.download_path, xlsx_files[0])
                 logger.info(f"File downloaded: {file_path}")
                 return file_path
 
@@ -226,14 +226,8 @@ class MeitavDownloader:
             return None
 
         except Exception as e:
-            logger.error(f"Error in submit_otp_and_download: {e}")
-
-            # אולי הקובץ כבר הורד?
-            files = os.listdir(self.download_path)
-            xlsx_files = [f for f in files if f.endswith('.xlsx')]
-            if xlsx_files:
-                return os.path.join(self.download_path, xlsx_files[-1])
-
+            logger.error(f"Error in download_report: {e}")
+            await self.page.screenshot({'path': '/tmp/meitav_debug_error.png'})
             return None
 
     async def close(self):
