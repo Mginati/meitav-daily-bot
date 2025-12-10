@@ -8,6 +8,7 @@ Meitav Downloader
 import os
 import asyncio
 import logging
+import aiohttp
 
 logger = logging.getLogger(__name__)
 
@@ -21,6 +22,7 @@ class MeitavDownloader:
         self.browser = None
         self.page = None
         self.download_path = "/tmp/meitav_downloads"
+        self.cookies = []
 
     async def start(self):
         """הפעלת הדפדפן - מקומי או מרוחק"""
@@ -52,12 +54,6 @@ class MeitavDownloader:
         # הגדרת timeout
         self.page.setDefaultNavigationTimeout(60000)
 
-        # הגדרת נתיב הורדה
-        await self.page._client.send('Page.setDownloadBehavior', {
-            'behavior': 'allow',
-            'downloadPath': self.download_path
-        })
-
         logger.info("Browser started")
 
     async def download_report(self, url: str, id_number: str) -> str:
@@ -68,7 +64,7 @@ class MeitavDownloader:
         1. כניסה לקישור
         2. הזנת תעודת זהות
         3. לחיצה על התחבר
-        4. לחיצה על הקובץ להורדה
+        4. מציאת URL של הקובץ והורדה ישירה
 
         Args:
             url: קישור ההורדה מהמייל
@@ -105,7 +101,6 @@ class MeitavDownloader:
 
             if not password_field:
                 logger.error("Could not find password field")
-                await self.page.screenshot({'path': '/tmp/meitav_debug_step1.png'})
                 return None
 
             # שלב 2: הזנת תעודת הזהות
@@ -133,7 +128,6 @@ class MeitavDownloader:
                     continue
 
             if not clicked:
-                # נסיון ללחוץ על כל כפתור
                 try:
                     submit_btn = await self.page.querySelector('input[type="submit"]')
                     if submit_btn:
@@ -145,89 +139,153 @@ class MeitavDownloader:
 
             if not clicked:
                 logger.error("Could not find submit button")
-                await self.page.screenshot({'path': '/tmp/meitav_debug_step3.png'})
                 return None
 
             # מחכה לטעינת הדף הבא (עמוד המסמכים)
             logger.info("Waiting for documents page...")
             await asyncio.sleep(5)
 
-            # צילום מסך לדיבוג
-            await self.page.screenshot({'path': '/tmp/meitav_debug_after_login.png'})
+            # שומר את הקוקיז לשימוש בהורדה
+            self.cookies = await self.page.cookies()
+            logger.info(f"Got {len(self.cookies)} cookies")
 
-            # שלב 4: חיפוש קישור להורדת הקובץ
-            logger.info("Looking for download link...")
+            # שלב 4: חיפוש URL של הקובץ להורדה
+            logger.info("Looking for download URL...")
 
-            # מחפש קישור לקובץ xlsx
-            download_link = None
+            download_url = None
+            file_name = None
 
-            # נסיון 1: מחפש קישור עם xlsx בטקסט או ב-href
+            # מחפש קישורים עם href שמכיל xlsx או download
             links = await self.page.querySelectorAll('a')
             for link in links:
                 try:
                     href = await self.page.evaluate('(el) => el.href || ""', link)
                     text = await self.page.evaluate('(el) => el.innerText || ""', link)
 
-                    if '.xlsx' in href.lower() or '.xlsx' in text.lower() or 'דוח' in text:
-                        download_link = link
-                        logger.info(f"Found download link: {text}")
+                    logger.info(f"Found link: href={href[:100] if href else 'none'}, text={text[:50] if text else 'none'}")
+
+                    if href and ('.xlsx' in href.lower() or 'download' in href.lower() or 'attachment' in href.lower()):
+                        download_url = href
+                        file_name = text.strip() if text else "report.xlsx"
+                        logger.info(f"Found download URL: {download_url}")
                         break
-                except:
+
+                    # מחפש גם לפי טקסט
+                    if '.xlsx' in text.lower():
+                        download_url = href
+                        file_name = text.strip()
+                        logger.info(f"Found xlsx by text: {text}")
+                        break
+                except Exception as e:
+                    logger.debug(f"Error checking link: {e}")
                     continue
 
-            # נסיון 2: מחפש כל אלמנט שניתן ללחוץ עליו עם xlsx
-            if not download_link:
-                elements = await self.page.querySelectorAll('[href*=".xlsx"], [onclick*="download"], .download-link')
-                if elements:
-                    download_link = elements[0]
-                    logger.info("Found download element by selector")
+            # אם לא מצאנו, ננסה לחפש בכל הדף
+            if not download_url:
+                page_content = await self.page.content()
+                logger.info(f"Page URL: {self.page.url}")
 
-            # נסיון 3: מחפש לפי טקסט שמכיל "xlsx" או "דוח"
-            if not download_link:
-                all_elements = await self.page.querySelectorAll('*')
-                for el in all_elements:
+                # מחפש URL בתוכן הדף
+                import re
+                urls = re.findall(r'href=["\']([^"\']*(?:download|attachment|xlsx)[^"\']*)["\']', page_content, re.IGNORECASE)
+                if urls:
+                    download_url = urls[0]
+                    if not download_url.startswith('http'):
+                        # יצירת URL מלא
+                        base_url = '/'.join(self.page.url.split('/')[:3])
+                        download_url = base_url + download_url if download_url.startswith('/') else base_url + '/' + download_url
+                    logger.info(f"Found URL in content: {download_url}")
+
+            if not download_url:
+                # ננסה גישה אחרת - ללחוץ על הקישור ולתפוס את ה-response
+                logger.info("Trying click-and-intercept approach...")
+
+                # מחפש אלמנט עם טקסט xlsx
+                elements = await self.page.querySelectorAll('a, span, div, td')
+                for el in elements:
                     try:
                         text = await self.page.evaluate('(el) => el.innerText || ""', el)
-                        tag = await self.page.evaluate('(el) => el.tagName', el)
-                        if '.xlsx' in text and tag in ['A', 'SPAN', 'DIV', 'TD']:
-                            download_link = el
-                            logger.info(f"Found element with xlsx text: {text[:50]}")
-                            break
+                        if '.xlsx' in text:
+                            # מנסה לקבל את ה-onclick או href
+                            onclick = await self.page.evaluate('(el) => el.onclick ? el.onclick.toString() : ""', el)
+                            href = await self.page.evaluate('(el) => el.href || el.parentElement?.href || ""', el)
+
+                            logger.info(f"Found xlsx element: text={text}, onclick={onclick[:100] if onclick else 'none'}, href={href}")
+
+                            if href:
+                                download_url = href
+                                file_name = text.strip()
+                                break
                     except:
                         continue
 
-            if not download_link:
-                logger.error("Could not find download link")
+            if not download_url:
+                logger.error("Could not find download URL")
+                # הדפסת תוכן הדף לדיבוג
                 page_content = await self.page.content()
-                logger.info(f"Page content preview: {page_content[:1000]}")
-                await self.page.screenshot({'path': '/tmp/meitav_debug_no_link.png'})
+                logger.info(f"Page content (first 2000 chars): {page_content[:2000]}")
                 return None
 
-            # לחיצה על הקישור להורדה
-            logger.info("Clicking download link...")
-            await download_link.click()
+            # שלב 5: הורדת הקובץ ישירות דרך HTTP
+            logger.info(f"Downloading file from: {download_url}")
 
-            # מחכה להורדה
-            logger.info("Waiting for download to complete...")
-            await asyncio.sleep(10)
+            file_path = await self._download_file(download_url, file_name)
 
-            # חיפוש הקובץ שהורד
-            files = os.listdir(self.download_path)
-            xlsx_files = [f for f in files if f.endswith('.xlsx')]
-
-            if xlsx_files:
-                # מחזיר את הקובץ האחרון
-                xlsx_files.sort(key=lambda x: os.path.getmtime(os.path.join(self.download_path, x)), reverse=True)
-                file_path = os.path.join(self.download_path, xlsx_files[0])
-                logger.info(f"File downloaded: {file_path}")
+            if file_path:
+                logger.info(f"File downloaded successfully: {file_path}")
                 return file_path
 
-            logger.warning("No xlsx file found after download")
+            logger.warning("Failed to download file")
             return None
 
         except Exception as e:
             logger.error(f"Error in download_report: {e}")
-            await self.page.screenshot({'path': '/tmp/meitav_debug_error.png'})
+            import traceback
+            logger.error(traceback.format_exc())
+            return None
+
+    async def _download_file(self, url: str, file_name: str = None) -> str:
+        """הורדת קובץ ישירות דרך HTTP עם הקוקיז מהדפדפן"""
+        try:
+            # יצירת headers עם cookies
+            cookie_header = '; '.join([f"{c['name']}={c['value']}" for c in self.cookies])
+
+            headers = {
+                'Cookie': cookie_header,
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+            }
+
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url, headers=headers, ssl=False) as response:
+                    if response.status == 200:
+                        # קביעת שם הקובץ
+                        if not file_name or not file_name.endswith('.xlsx'):
+                            # מנסה לקבל מ-Content-Disposition
+                            cd = response.headers.get('Content-Disposition', '')
+                            if 'filename=' in cd:
+                                import re
+                                match = re.search(r'filename[*]?=["\']?([^"\';\n]+)', cd)
+                                if match:
+                                    file_name = match.group(1).strip()
+
+                            if not file_name or not file_name.endswith('.xlsx'):
+                                file_name = 'meitav_report.xlsx'
+
+                        file_path = os.path.join(self.download_path, file_name)
+
+                        # שמירת הקובץ
+                        content = await response.read()
+                        with open(file_path, 'wb') as f:
+                            f.write(content)
+
+                        logger.info(f"Downloaded {len(content)} bytes to {file_path}")
+                        return file_path
+                    else:
+                        logger.error(f"Download failed with status {response.status}")
+                        return None
+
+        except Exception as e:
+            logger.error(f"Error downloading file: {e}")
             return None
 
     async def close(self):
