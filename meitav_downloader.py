@@ -78,34 +78,54 @@ class MeitavDownloader:
             await self.page.goto(url, {'waitUntil': 'networkidle0'})
 
             # מחכה לטעינת הדף
-            await asyncio.sleep(2)
+            await asyncio.sleep(3)
 
             # שלב 1: מחפש את שדה הסיסמה (truePass)
             logger.info("Looking for password field (truePass)...")
 
-            password_field = None
-            try:
-                # מחפש את השדה הספציפי של מיטב
-                await self.page.waitForSelector('input[name="truePass"]', {'timeout': 10000})
-                password_field = await self.page.querySelector('input[name="truePass"]')
-                logger.info("Found truePass field")
-            except:
-                # נסיון חלופי
+            # מחכה שהדף יהיה מוכן
+            await self.page.waitForSelector('input', {'timeout': 15000})
+
+            # מדפיס את כל ה-inputs לדיבוג
+            inputs = await self.page.querySelectorAll('input')
+            logger.info(f"Found {len(inputs)} input elements")
+
+            for i, inp in enumerate(inputs):
                 try:
-                    password_field = await self.page.querySelector('input[type="password"]')
-                    if not password_field:
-                        password_field = await self.page.querySelector('input[type="text"]')
-                    logger.info("Found alternative input field")
+                    inp_type = await self.page.evaluate('(el) => el.type', inp)
+                    inp_name = await self.page.evaluate('(el) => el.name', inp)
+                    inp_visible = await self.page.evaluate('(el) => el.offsetParent !== null', inp)
+                    logger.info(f"Input {i}: type={inp_type}, name={inp_name}, visible={inp_visible}")
                 except:
                     pass
 
+            password_field = None
+
+            # מחפש שדה visible
+            for inp in inputs:
+                try:
+                    is_visible = await self.page.evaluate('(el) => el.offsetParent !== null && el.offsetHeight > 0', inp)
+                    inp_type = await self.page.evaluate('(el) => el.type', inp)
+                    inp_name = await self.page.evaluate('(el) => el.name || ""', inp)
+
+                    if is_visible and inp_type in ['text', 'password', 'tel']:
+                        password_field = inp
+                        logger.info(f"Found visible input field: type={inp_type}, name={inp_name}")
+                        break
+                except Exception as e:
+                    logger.debug(f"Error checking input: {e}")
+                    continue
+
             if not password_field:
-                logger.error("Could not find password field")
+                logger.error("Could not find visible password field")
+                # ננסה JavaScript ישיר
+                page_html = await self.page.content()
+                logger.info(f"Page HTML snippet: {page_html[:1500]}")
                 return None
 
-            # שלב 2: הזנת תעודת הזהות
-            await password_field.click()
-            await password_field.type(id_number)
+            # שלב 2: הזנת תעודת הזהות - משתמש ב-JavaScript
+            logger.info("Entering ID number using JavaScript...")
+            await self.page.evaluate(f'(el) => {{ el.value = "{id_number}"; el.dispatchEvent(new Event("input", {{ bubbles: true }})); }}', password_field)
             logger.info("ID number entered")
 
             await asyncio.sleep(1)
